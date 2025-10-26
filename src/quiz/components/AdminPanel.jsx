@@ -79,19 +79,21 @@ export default function AdminPanel({ onClose }) {
                     <th>Cargo</th>
                     <th>Score</th>
                     <th>Tier</th>
+                    <th>%</th>
                     <th>Data</th>
                   </tr>
                 </thead>
                 <tbody>
                   {leads.map((lead, index) => (
                     <tr key={lead.id || index}>
-                      <td>{lead.nome}</td>
+                      <td>{lead.name || lead.nome}</td>
                       <td>{lead.email}</td>
                       <td>{lead.whatsapp}</td>
-                      <td>{lead.empresa}</td>
-                      <td>{lead.cargo}</td>
+                      <td>{lead.empresa || '-'}</td>
+                      <td>{lead.cargo || '-'}</td>
                       <td>{lead.score || 'N/A'}</td>
                       <td>{lead.tier || 'N/A'}</td>
+                      <td>{lead.percentage || 'N/A'}%</td>
                       <td>
                         {lead.created_at 
                           ? new Date(lead.created_at).toLocaleDateString('pt-BR')

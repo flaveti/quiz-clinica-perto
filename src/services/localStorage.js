@@ -1,42 +1,65 @@
-// Serviço de armazenamento local para leads
-const STORAGE_KEY = 'clinica_perto_leads';
+// Serviço de armazenamento para leads usando Supabase Cloud
+import { supabase } from './supabase';
 
-// Função para salvar lead
+const STORAGE_KEY = 'clinica_perto_leads'; // Mantido para backup local
+
+// Função para salvar lead no Supabase
 export async function saveLead(leadData) {
   try {
-    console.log('=== SALVANDO LEAD ===');
+    console.log('=== SALVANDO LEAD NO SUPABASE ===');
     console.log('Dados recebidos:', leadData);
     
-    const leads = getStoredLeads();
-    console.log('Leads existentes:', leads.length);
-    
-    const newLead = {
-      ...leadData,
-      id: Date.now(),
-      created_at: new Date().toISOString()
-    };
-    
     // Verificar duplicata por email ou WhatsApp (apenas se foi no mesmo dia)
-    const hoje = new Date().toDateString();
-    const isDuplicate = leads.some(lead => {
-      const leadDate = new Date(lead.created_at).toDateString();
-      return leadDate === hoje && (lead.email === leadData.email || lead.whatsapp === leadData.whatsapp);
-    });
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
     
+    const { data: existingLeads, error: checkError } = await supabase
+      .from('leads')
+      .select('*')
+      .or(`email.eq.${leadData.email},whatsapp.eq.${leadData.whatsapp}`)
+      .gte('created_at', hoje.toISOString());
+    
+    if (checkError) {
+      console.error('Erro ao verificar duplicatas:', checkError);
+    }
+    
+    const isDuplicate = existingLeads && existingLeads.length > 0;
     console.log('É duplicado no mesmo dia?', isDuplicate);
     console.log('Email:', leadData.email, 'WhatsApp:', leadData.whatsapp);
     
     if (!isDuplicate) {
-      leads.push(newLead);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(leads));
-      console.log('Lead salvo! Total agora:', leads.length);
-      console.log('Todos os leads:', leads.map(l => ({ email: l.email, whatsapp: l.whatsapp, created_at: l.created_at })));
+      // Preparar dados para inserção
+      const newLead = {
+        name: leadData.name || leadData.nome, // Aceita 'name' ou 'nome'
+        email: leadData.email,
+        whatsapp: leadData.whatsapp,
+        empresa: leadData.empresa || null,
+        cargo: leadData.cargo || null,
+        score: leadData.score,
+        tier: leadData.tier,
+        percentage: leadData.percentage,
+        answers: leadData.answers || {}
+      };
       
-      // Salvar também em arquivo JSON para download
-      await saveToJsonFile(leads);
+      console.log('Inserindo no Supabase:', newLead);
       
-      console.log('Lead salvo com sucesso:', newLead);
-      return { success: true, data: newLead, isNew: true };
+      // Inserir no Supabase
+      const { data, error } = await supabase
+        .from('leads')
+        .insert([newLead])
+        .select();
+      
+      if (error) {
+        console.error('Erro ao inserir no Supabase:', error);
+        throw error;
+      }
+      
+      console.log('Lead salvo no Supabase com sucesso!', data);
+      
+      // Backup local no localStorage
+      saveToLocalStorage(data[0]);
+      
+      return { success: true, data: data[0], isNew: true };
     } else {
       console.log('Lead duplicado no mesmo dia, não salvo:', leadData);
       console.log('Para permitir novo preenchimento, use email/WhatsApp diferentes');
@@ -44,52 +67,48 @@ export async function saveLead(leadData) {
     }
   } catch (error) {
     console.error('Erro ao salvar lead:', error);
-    return { success: false, error };
+    return { success: false, error: error.message };
   }
 }
 
-// Função para salvar em arquivo JSON
-async function saveToJsonFile(leads) {
-  try {
-    const jsonData = {
-      leads: leads,
-      exported_at: new Date().toISOString(),
-      total_leads: leads.length,
-      metadata: {
-        app: 'Clinica Perto - Quiz Saude',
-        version: '1.0.0'
-      }
-    };
-    
-    const jsonString = JSON.stringify(jsonData, null, 2);
-    const blob = new Blob([jsonString], { type: 'application/json' });
-    
-    // Criar URL temporária para o arquivo
-    const url = URL.createObjectURL(blob);
-    
-    // Auto-download do arquivo atualizado (opcional, pode ser removido)
-    // const link = document.createElement('a');
-    // link.href = url;
-    // link.download = `clinica-perto-leads-${new Date().toISOString().split('T')[0]}.json`;
-    // link.click();
-    
-    console.log('Dados salvos em formato JSON para backup');
-  } catch (error) {
-    console.error('Erro ao salvar arquivo JSON:', error);
-  }
-}
-
-// Função para buscar todos os leads
-export async function getLeads() {
+// Função para backup local no localStorage
+function saveToLocalStorage(lead) {
   try {
     const leads = getStoredLeads();
-    console.log('=== BUSCANDO LEADS ===');
-    console.log('Total de leads encontrados:', leads.length);
-    console.log('Leads:', leads);
-    return { success: true, data: leads };
+    leads.push(lead);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(leads));
+    console.log('Backup local salvo no localStorage');
+  } catch (error) {
+    console.error('Erro ao salvar backup local:', error);
+  }
+}
+
+// Função para buscar todos os leads do Supabase
+export async function getLeads() {
+  try {
+    console.log('=== BUSCANDO LEADS DO SUPABASE ===');
+    
+    const { data, error } = await supabase
+      .from('leads')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error('Erro ao buscar leads do Supabase:', error);
+      throw error;
+    }
+    
+    console.log('Total de leads encontrados no Supabase:', data?.length || 0);
+    console.log('Leads:', data);
+    
+    return { success: true, data: data || [] };
   } catch (error) {
     console.error('Erro ao buscar leads:', error);
-    return { success: false, error };
+    
+    // Fallback para localStorage se Supabase falhar
+    console.log('Usando backup local do localStorage...');
+    const localLeads = getStoredLeads();
+    return { success: true, data: localLeads };
   }
 }
 
@@ -127,15 +146,16 @@ export function exportLeadsToCSV(leads) {
     return;
   }
 
-  const headers = ['Nome', 'Email', 'WhatsApp', 'Empresa', 'Cargo', 'Score', 'Tier', 'Data'];
+  const headers = ['Nome', 'Email', 'WhatsApp', 'Empresa', 'Cargo', 'Score', 'Tier', 'Porcentagem', 'Data'];
   const rows = leads.map(lead => [
-    lead.nome || '',
+    lead.name || lead.nome || '',
     lead.email || '',
     lead.whatsapp || '',
     lead.empresa || '',
     lead.cargo || '',
     lead.score || 'N/A',
     lead.tier || 'N/A',
+    lead.percentage || 'N/A',
     lead.created_at ? new Date(lead.created_at).toLocaleDateString('pt-BR') : 'N/A'
   ]);
 

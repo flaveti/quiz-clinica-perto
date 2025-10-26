@@ -43,7 +43,6 @@ Quiz interativo de saúde desenvolvido para a **Clínica Perto**, com sistema de
 
 ## 🔧 Painel Administrativo
 
-- **Acesso**: Clique 10 vezes no logo da Clínica Perto
 - **Funcionalidades**:
   - Visualizar todos os leads capturados
   - Exportar dados em CSV ou JSON
